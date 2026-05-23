@@ -1,0 +1,21 @@
+listing_id,property_type,city,region,price,created_at,updated_at,agent_id
+L001,apartment,Paris,Île-de-France,350000,2024-10-01 08:00:00,2024-10-01 08:00:00,A01
+L002,apartment,Paris,Île-de-France,425000,2024-10-05 09:30:00,2024-10-10 14:00:00,A01
+L003,house,Paris,Île-de-France,890000,2024-10-08 10:00:00,2024-10-08 10:00:00,A02
+L004,parking,Paris,Île-de-France,25000,2024-10-12 11:00:00,2025-01-15 09:00:00,A03
+L005,apartment,Lyon,Auvergne-Rhône-Alpes,210000,2024-10-15 08:30:00,2024-11-01 10:00:00,A04
+L006,house,Lyon,Auvergne-Rhône-Alpes,380000,2024-10-20 09:00:00,2024-10-20 09:00:00,A04
+L007,apartment,Marseille,PACA,180000,2024-11-01 08:00:00,2024-11-01 08:00:00,A05
+L008,house,Marseille,PACA,295000,2024-11-05 10:00:00,2024-12-01 11:00:00,A05
+L009,parking,Marseille,PACA,12000,2024-11-10 09:00:00,2024-11-10 09:00:00,A06
+L010,apartment,Toulouse,Occitanie,220000,2024-11-15 08:00:00,2024-11-15 08:00:00,A07
+L011,house,Toulouse,Occitanie,340000,2024-11-20 09:30:00,2024-12-01 10:00:00,A07
+L012,apartment,Rennes,Bretagne,195000,2024-12-01 08:00:00,2024-12-01 08:00:00,A08
+L013,house,Rennes,Bretagne,280000,2024-12-05 09:00:00,2025-01-10 11:00:00,A08
+L014,apartment,Nice,PACA,310000,2024-12-10 08:30:00,2024-12-10 08:30:00,A09
+L015,house,Nice,PACA,550000,2024-12-15 10:00:00,2025-01-05 09:00:00,A09
+L016,parking,Lyon,Auvergne-Rhône-Alpes,18000,2025-01-05 08:00:00,2025-01-05 08:00:00,A04
+L017,apartment,Bordeaux,Nouvelle-Aquitaine,265000,2025-01-10 09:00:00,2025-01-10 09:00:00,A10
+L018,house,Bordeaux,Nouvelle-Aquitaine,420000,2025-01-15 10:00:00,2025-02-01 11:00:00,A10
+L019,apartment,Toulouse,Occitanie,185000,2025-01-20 08:30:00,2025-01-20 08:30:00,A07
+L020,parking,Rennes,Bretagne,8500,2025-02-01 09:00:00,2025-02-01 09:00:00,A08

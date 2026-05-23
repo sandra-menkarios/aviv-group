@@ -1,0 +1,45 @@
+name: 'aviv_data'
+version: '1.0.0'
+config-version: 2
+
+profile: 'aviv_data'
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  aviv_data:
+    staging:
+      +materialized: view
+      +schema: staging
+    marts:
+      +materialized: table
+      +schema: marts
+
+seeds:
+  aviv_data:
+    +schema: raw
+    raw_listings:
+      +column_types:
+        listing_id: varchar
+        property_type: varchar
+        city: varchar
+        region: varchar
+        price: decimal(12,2)
+        created_at: timestamp
+        updated_at: timestamp
+        agent_id: varchar
+    raw_leads:
+      +column_types:
+        contact_id: varchar
+        listing_id: varchar
+        contact_source: varchar
+        contact_timestamp: timestamp
