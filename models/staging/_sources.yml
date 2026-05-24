@@ -1,0 +1,54 @@
+version: 2
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SOURCE DEFINITIONS
+# Production: raw tables populated in Snowflake via COPY INTO / Snowpipe.
+# Local dev:  simulated by dbt seeds (seeds/raw_listings.csv, raw_leads.csv).
+# ─────────────────────────────────────────────────────────────────────────────
+sources:
+  - name: raw
+    description: >
+      Raw layer: daily CSV snapshots ingested from S3 into Snowflake.
+      In local development these are simulated by dbt seeds.
+    database: "{{ env_var('DBT_DATABASE', 'SELOGER_DW') }}"
+    schema: raw
+    tables:
+      - name: listings
+        description: "Daily snapshot of active property listings from the SeLoger feed."
+        loaded_at_field: updated_at
+        freshness:
+          warn_after: { count: 25, period: hour }
+          error_after: { count: 49, period: hour }
+        columns:
+          - name: listing_id
+            description: "Primary key — unique listing identifier."
+          - name: property_type
+            description: "Raw property type string (apartment, house, parking)."
+          - name: city
+            description: "City where the property is located."
+          - name: region
+            description: "Administrative region."
+          - name: price
+            description: "Listed price in EUR."
+          - name: agent_id
+            description: "Agent responsible for the listing."
+          - name: created_at
+            description: "Timestamp when the listing was first published."
+          - name: updated_at
+            description: "Timestamp of the most recent listing update."
+
+      - name: leads
+        description: "Contact/lead events submitted by users on listings."
+        loaded_at_field: contact_timestamp
+        freshness:
+          warn_after: { count: 25, period: hour }
+          error_after: { count: 49, period: hour }
+        columns:
+          - name: contact_id
+            description: "Primary key — unique contact identifier."
+          - name: listing_id
+            description: "Foreign key → listings.listing_id."
+          - name: contact_source
+            description: "Acquisition channel: organic, paid, partner."
+          - name: contact_timestamp
+            description: "Timestamp when the contact event was submitted."

@@ -1,0 +1,63 @@
+version: 2
+
+models:
+  - name: dim_listing
+    description: >
+      Listing dimension: one row per property listing (SCD Type 1).
+      Reflects the current state of every listing. Downstream models that need
+      price history should use a dbt snapshot on top of stg_listings instead.
+    columns:
+      - name: listing_id
+        description: "Primary key — unique listing identifier."
+        tests:
+          - unique
+          - not_null
+
+      - name: property_type
+        description: "Normalised property type: apartment, house, or parking."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['apartment', 'house', 'parking']
+
+      - name: city
+        description: "City where the property is located."
+        tests:
+          - not_null
+
+      - name: region
+        description: "Administrative region."
+        tests:
+          - not_null
+
+      - name: price
+        description: "Current listed price in EUR."
+        tests:
+          - not_null
+
+      - name: agent_id
+        description: "Responsible agent — foreign key to dim_agent."
+        tests:
+          - not_null
+
+      - name: is_active
+        description: >
+          True if the listing was updated within the last 180 days of the
+          dataset's most recent record.
+
+      - name: created_at
+        description: "Timestamp when the listing was first published."
+        tests:
+          - not_null
+
+      - name: updated_at
+        description: "Timestamp of the most recent listing update."
+        tests:
+          - not_null
+
+      - name: created_date
+        description: "Date key (YYYY-MM-DD) — joins to dim_date.date_day."
+
+      - name: updated_date
+        description: "Date key (YYYY-MM-DD) — joins to dim_date.date_day."

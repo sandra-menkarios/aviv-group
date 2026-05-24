@@ -1,0 +1,66 @@
+version: 2
+
+models:
+  - name: fct_leads
+    description: >
+      Lead fact table: one row per contact event (grain = contact_id).
+      Denormalises listing attributes from dim_listing so marts can aggregate
+      without additional joins. contact_date is the date key for dim_date joins.
+      Materialized as a table because it is the primary target of mart aggregations.
+    columns:
+      - name: contact_id
+        description: "Primary key — unique contact/lead identifier."
+        tests:
+          - unique
+          - not_null
+
+      - name: listing_id
+        description: "Foreign key → dim_listing.listing_id."
+        tests:
+          - not_null
+          - relationships:
+              name: fct_leads_listing_id_exists
+              arguments:
+                to: ref('dim_listing')
+                field: listing_id
+
+      - name: contact_date
+        description: "Date key (YYYY-MM-DD) — joins to dim_date.date_day."
+        tests:
+          - not_null
+          - relationships:
+              name: fct_leads_contact_date_in_dim_date
+              arguments:
+                to: ref('dim_date')
+                field: date_day
+
+      - name: contact_source
+        description: "Acquisition channel: organic, paid, or partner."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['organic', 'paid', 'partner']
+
+      - name: contact_timestamp
+        description: "Full timestamp of the contact event."
+        tests:
+          - not_null
+
+      - name: property_type
+        description: "Denormalized from dim_listing — property segment."
+
+      - name: region
+        description: "Denormalized from dim_listing — administrative region."
+
+      - name: city
+        description: "Denormalized from dim_listing — city."
+
+      - name: agent_id
+        description: "Denormalized from dim_listing — responsible agent."
+
+      - name: listing_price
+        description: "Denormalized from dim_listing — listing price in EUR at time of mart build."
+
+      - name: listing_is_active
+        description: "Denormalized from dim_listing — whether the listing was active at mart build time."

@@ -4,8 +4,9 @@ models:
   - name: mart_leads_per_listing
     description: >
       Core business metric: leads per active listing, aggregated by
-      property_type × region. Powers conversion-tier dashboards, regional
-      performance tracking, and marketing spend optimisation.
+      property_type × region. Joins from the core fct/dim layer.
+      Powers conversion-tier dashboards, regional performance tracking,
+      and marketing spend optimisation.
     columns:
       - name: property_type
         description: "Property segment (apartment, house, parking)."
@@ -30,7 +31,7 @@ models:
       - name: leads_per_listing
         description: >
           Key business KPI: total_leads / active_listing_count, rounded to 2dp.
-          High values indicate strong demand; low values may signal pricing or
+          High values signal strong demand; low values may indicate pricing or
           marketing gaps.
 
       - name: min_leads
@@ -44,5 +45,5 @@ models:
 
       - name: listings_with_no_leads
         description: >
-          Count of active listings with zero leads. A high ratio signals
+          Count of active listings with zero leads. A high ratio flags
           under-served inventory worth investigating or re-pricing.

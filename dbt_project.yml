@@ -20,6 +20,9 @@ models:
     staging:
       +materialized: view
       +schema: staging
+    core:
+      +materialized: view       # dims/fcts default to views; tables override per-model
+      +schema: core
     marts:
       +materialized: table
       +schema: marts
