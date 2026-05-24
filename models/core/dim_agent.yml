@@ -7,36 +7,47 @@ models:
       No upstream agent feed exists yet — attributes are inferred from
       stg_listings. Enrich with name/team when a dedicated agent source
       becomes available.
+    config:
+      contract:
+        enforced: true
     columns:
       - name: agent_id
+        data_type: varchar
         description: "Primary key — unique agent identifier."
         tests:
           - unique
           - not_null
 
       - name: total_listings
+        data_type: bigint
         description: "Total number of listings ever managed by this agent."
         tests:
           - not_null
 
       - name: active_listings
+        data_type: bigint
         description: "Number of currently active listings managed by this agent."
         tests:
           - not_null
 
       - name: inactive_listings
+        data_type: bigint
         description: "Number of stale / inactive listings managed by this agent."
         tests:
           - not_null
 
       - name: first_listing_at
+        data_type: timestamp
         description: "Timestamp of the agent's earliest listing creation."
 
       - name: latest_listing_at
+        data_type: timestamp
         description: "Timestamp of the agent's most recent listing creation."
 
       - name: regions_covered
+        data_type: bigint
         description: "Number of distinct regions the agent has listings in."
 
       - name: cities_covered
+        data_type: bigint
         description: "Number of distinct cities the agent has listings in."

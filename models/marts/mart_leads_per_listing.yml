@@ -7,43 +7,55 @@ models:
       property_type × region. Joins from the core fct/dim layer.
       Powers conversion-tier dashboards, regional performance tracking,
       and marketing spend optimisation.
+    config:
+      contract:
+        enforced: true
     columns:
       - name: property_type
+        data_type: varchar
         description: "Property segment (apartment, house, parking)."
         tests:
           - not_null
 
       - name: region
+        data_type: varchar
         description: "Administrative region."
         tests:
           - not_null
 
       - name: active_listing_count
+        data_type: bigint
         description: "Number of active listings in this segment."
         tests:
           - not_null
 
       - name: total_leads
+        data_type: bigint
         description: "Sum of all leads received by active listings in this segment."
         tests:
           - not_null
 
       - name: leads_per_listing
+        data_type: double
         description: >
           Key business KPI: total_leads / active_listing_count, rounded to 2dp.
           High values signal strong demand; low values may indicate pricing or
           marketing gaps.
 
       - name: min_leads
+        data_type: bigint
         description: "Minimum lead count on any single listing in the segment."
 
       - name: max_leads
+        data_type: bigint
         description: "Maximum lead count on any single listing in the segment."
 
       - name: avg_leads
+        data_type: double
         description: "Mean lead count per listing in the segment."
 
       - name: listings_with_no_leads
+        data_type: bigint
         description: >
           Count of active listings with zero leads. A high ratio flags
           under-served inventory worth investigating or re-pricing.

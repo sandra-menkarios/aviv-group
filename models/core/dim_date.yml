@@ -6,19 +6,29 @@ models:
       Date dimension table: one row per calendar day from 2024-01-01 to 2025-12-31.
       Materialized as a table so BI tools can join without re-computing the spine.
       Extend the range in dim_date.sql when a new year approaches.
+    config:
+      contract:
+        enforced: true
+        # Contract guarantee: any model referencing dim_date can rely on these
+        # column names and types never changing without a deliberate schema bump.
+        # A breaking change (rename, type change, removal) must be communicated
+        # to all downstream consumers before deployment.
     columns:
       - name: date_day
+        data_type: date
         description: "Primary key — the calendar date."
         tests:
           - unique
           - not_null
 
       - name: year
+        data_type: integer
         description: "4-digit calendar year."
         tests:
           - not_null
 
       - name: quarter
+        data_type: integer
         description: "Calendar quarter (1–4)."
         tests:
           - not_null
@@ -27,44 +37,57 @@ models:
                 values: [1, 2, 3, 4]
 
       - name: month_number
+        data_type: integer
         description: "Month number (1–12)."
         tests:
           - not_null
 
       - name: month_name
+        data_type: varchar
         description: "Full month name (e.g., 'January')."
 
       - name: iso_week
+        data_type: integer
         description: "ISO 8601 week number (1–53)."
 
       - name: day_of_month
+        data_type: integer
         description: "Day within the month (1–31)."
 
       - name: day_of_week
+        data_type: integer
         description: "Day of week: 0 = Sunday, 6 = Saturday."
         tests:
           - not_null
 
       - name: day_name
+        data_type: varchar
         description: "Full weekday name (e.g., 'Monday')."
 
       - name: first_day_of_month
+        data_type: date
         description: "First calendar day of the month."
 
       - name: last_day_of_month
+        data_type: date
         description: "Last calendar day of the month."
 
       - name: first_day_of_year
+        data_type: date
         description: "January 1st of the year."
 
       - name: is_weekend
+        data_type: boolean
         description: "True if Saturday or Sunday."
 
       - name: is_weekday
+        data_type: boolean
         description: "True if Monday–Friday."
 
       - name: year_quarter
-        description: "Label for BI grouping, e.g. '2024-Q3'."
+        data_type: varchar
+        description: "BI label e.g. '2024-Q3'."
 
       - name: year_month
-        description: "Label for BI grouping, e.g. '2024-10'."
+        data_type: varchar
+        description: "BI label e.g. '2024-10'."

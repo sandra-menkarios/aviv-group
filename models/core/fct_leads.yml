@@ -7,14 +7,19 @@ models:
       Denormalises listing attributes from dim_listing so marts can aggregate
       without additional joins. contact_date is the date key for dim_date joins.
       Materialized as a table because it is the primary target of mart aggregations.
+    config:
+      contract:
+        enforced: true
     columns:
       - name: contact_id
+        data_type: varchar
         description: "Primary key — unique contact/lead identifier."
         tests:
           - unique
           - not_null
 
       - name: listing_id
+        data_type: varchar
         description: "Foreign key → dim_listing.listing_id."
         tests:
           - not_null
@@ -25,6 +30,7 @@ models:
                 field: listing_id
 
       - name: contact_date
+        data_type: date
         description: "Date key (YYYY-MM-DD) — joins to dim_date.date_day."
         tests:
           - not_null
@@ -35,6 +41,7 @@ models:
                 field: date_day
 
       - name: contact_source
+        data_type: varchar
         description: "Acquisition channel: organic, paid, or partner."
         tests:
           - not_null
@@ -43,24 +50,31 @@ models:
                 values: ['organic', 'paid', 'partner']
 
       - name: contact_timestamp
+        data_type: timestamp
         description: "Full timestamp of the contact event."
         tests:
           - not_null
 
       - name: property_type
+        data_type: varchar
         description: "Denormalized from dim_listing — property segment."
 
       - name: region
+        data_type: varchar
         description: "Denormalized from dim_listing — administrative region."
 
       - name: city
+        data_type: varchar
         description: "Denormalized from dim_listing — city."
 
       - name: agent_id
+        data_type: varchar
         description: "Denormalized from dim_listing — responsible agent."
 
       - name: listing_price
-        description: "Denormalized from dim_listing — listing price in EUR at time of mart build."
+        data_type: decimal(12,2)
+        description: "Denormalized from dim_listing — listing price in EUR at mart build time."
 
       - name: listing_is_active
+        data_type: boolean
         description: "Denormalized from dim_listing — whether the listing was active at mart build time."

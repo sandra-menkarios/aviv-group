@@ -6,14 +6,19 @@ models:
       Listing dimension: one row per property listing (SCD Type 1).
       Reflects the current state of every listing. Downstream models that need
       price history should use a dbt snapshot on top of stg_listings instead.
+    config:
+      contract:
+        enforced: true
     columns:
       - name: listing_id
+        data_type: varchar
         description: "Primary key — unique listing identifier."
         tests:
           - unique
           - not_null
 
       - name: property_type
+        data_type: varchar
         description: "Normalised property type: apartment, house, or parking."
         tests:
           - not_null
@@ -22,42 +27,51 @@ models:
                 values: ['apartment', 'house', 'parking']
 
       - name: city
+        data_type: varchar
         description: "City where the property is located."
         tests:
           - not_null
 
       - name: region
+        data_type: varchar
         description: "Administrative region."
         tests:
           - not_null
 
       - name: price
+        data_type: decimal(12,2)
         description: "Current listed price in EUR."
         tests:
           - not_null
 
       - name: agent_id
+        data_type: varchar
         description: "Responsible agent — foreign key to dim_agent."
         tests:
           - not_null
 
       - name: is_active
+        data_type: boolean
         description: >
           True if the listing was updated within the last 180 days of the
           dataset's most recent record.
 
       - name: created_at
+        data_type: timestamp
         description: "Timestamp when the listing was first published."
         tests:
           - not_null
 
       - name: updated_at
+        data_type: timestamp
         description: "Timestamp of the most recent listing update."
         tests:
           - not_null
 
       - name: created_date
+        data_type: date
         description: "Date key (YYYY-MM-DD) — joins to dim_date.date_day."
 
       - name: updated_date
+        data_type: date
         description: "Date key (YYYY-MM-DD) — joins to dim_date.date_day."

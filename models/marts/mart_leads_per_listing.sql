@@ -40,23 +40,23 @@ final as (
         property_type,
         region,
 
-        count(listing_id)                                               as active_listing_count,
-        sum(lead_count)                                                 as total_leads,
+        count(listing_id)::bigint                                       as active_listing_count,
+        sum(lead_count)::bigint                                         as total_leads,
 
         -- Key business metric
         round(
             sum(lead_count)::decimal(12, 4)
             / nullif(count(listing_id), 0),
             2
-        )                                                               as leads_per_listing,
+        )::double                                                       as leads_per_listing,
 
         -- Distribution helpers for deeper analysis
-        min(lead_count)                                                 as min_leads,
-        max(lead_count)                                                 as max_leads,
-        round(avg(lead_count), 2)                                       as avg_leads,
+        min(lead_count)::bigint                                         as min_leads,
+        max(lead_count)::bigint                                         as max_leads,
+        round(avg(lead_count), 2)::double                               as avg_leads,
 
         -- Under-served inventory signal
-        sum(case when lead_count = 0 then 1 else 0 end)                as listings_with_no_leads
+        sum(case when lead_count = 0 then 1 else 0 end)::bigint        as listings_with_no_leads
 
     from leads_per_listing
     group by property_type, region
