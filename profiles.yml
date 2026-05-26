@@ -1,22 +1,3 @@
-# Local development profile using DuckDB.
-# Copy this file to ~/.dbt/profiles.yml, or run dbt with:
-#   dbt run --profiles-dir .
-#
-# For production on Snowflake, replace with:
-# aviv_data:
-#   target: prod
-#   outputs:
-#     prod:
-#       type: snowflake
-#       account: <your_account>
-#       user: <your_user>
-#       password: "{{ env_var('SNOWFLAKE_PASSWORD') }}"
-#       role: transformer
-#       database: SELOGER_DW
-#       warehouse: TRANSFORMING_WH
-#       schema: dbt_staging
-#       threads: 4
-
 aviv_data:
   target: dev
   outputs:
