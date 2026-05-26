@@ -18,6 +18,9 @@ clean-targets:
 
 models:
   aviv_data:
+    +persist_docs:
+      relation: true
+      columns: true
     staging:
       +materialized: view
       +schema: staging
