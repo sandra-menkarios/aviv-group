@@ -1,4 +1,4 @@
-# SeLoger Lead Conversion — Data Pipeline Design Note
+# Data Pipeline Design Note
 
 **Date:** May 2026
 **Scope:** dbt project for listing and lead data, DuckDB local dev, production-portable
@@ -7,101 +7,96 @@
 
 ## Architecture
 
-Three-layer pipeline:
+The pipeline follows a three-layer structure:
 
 ```
-Seeds (raw CSVs) → Staging → Core (dims + facts) → Mart → Analyses
+Seeds (raw CSVs) -> Staging -> Core (dims + facts) -> Mart -> Analyses
 ```
 
-**Staging** casts types and trims whitespace only. No business logic lives here. The layer
-exists to absorb source format changes without touching core models.
+Staging only casts types and trims whitespace - nothing else. I wanted this layer to be
+a safe buffer against upstream changes, so I kept all business logic out of it entirely.
 
-**Core** owns all business semantics: the 180-day `is_active` rule, lowercase normalisation
-on `property_type` and `contact_source`, and SCD Type 2 history via dbt snapshots.
+Core is where all the actual decisions live: the 180-day `is_active` rule, lowercase
+normalisation, and the SCD Type 2 history via snapshots.
 
-**Mart** is a single aggregation — lead density by property type and region — that the
-analyses layer reads directly. It selects only the columns it needs; no pass-through CTEs.
+The mart is a single aggregation - lead density by property type and region. It only
+pulls the columns it needs; I removed the pass-through CTEs that were there before since
+they added no value.
 
 ---
 
 ## Key Design Decisions
 
-**Staging = cast + trim only.**
-Business rules like `is_active` were initially placed in staging. Moving them to core makes
-the layer honest: staging absorbs source format changes; core enforces business semantics.
-A downstream consumer of `stg_listings` should not need to know the 180-day activity window
-exists.
+**Staging does nothing except cast and trim.**
+I initially had business rules like `is_active` in staging, but that felt wrong - staging
+should absorb source changes without breaking anything downstream. A consumer of
+`stg_listings` shouldn't need to know the 180-day activity window exists. Moving that
+logic to core made the layers much cleaner.
 
-**`is_active` belongs in `dim_listing`.**
-A listing is active if its `updated_at` falls within 180 days of the most recent update
-across all current rows. That is a business definition, not a formatting decision. It belongs
-in the dimension that owns listing state.
+**`is_active` lives in `dim_listing`.**
+A listing is active if its `updated_at` is within 180 days of the most recent update in
+the dataset. That's a business rule, not a formatting concern, so it belongs in the
+dimension that owns listing state - not in staging.
 
-**Snapshots kept despite thin history.**
-Snapshots add complexity but preserve the ability to do point-in-time analysis — e.g. what
-was the listing price when the lead arrived. `fct_leads` currently joins on `is_current = true`
-because the seed data has no meaningful price-change history yet. A TODO comment documents
-the correct point-in-time join (`contact_timestamp::date BETWEEN valid_from AND COALESCE(valid_to,
-'9999-12-31')`) for when real history accumulates. Removing snapshots now to save complexity
-would mean rebuilding history from scratch later.
+**I kept the snapshots even though history is thin.**
+The dataset doesn't have meaningful price-change history yet, so `fct_leads` currently
+joins on `is_current = true`. But removing snapshots now would mean rebuilding history
+from scratch later, which isn't worth the short-term simplification. I left a TODO in
+`fct_leads.sql` with the correct point-in-time join for when the data does accumulate.
 
-**`dbt_utils.date_spine` over DuckDB `range()`.**
-`range()` is DuckDB-only. `dbt_utils.date_spine` compiles correctly on Snowflake, BigQuery,
-or Redshift — production is unlikely to stay on DuckDB.
+**`dbt_utils.date_spine` instead of DuckDB's `range()`.**
+`range()` only works on DuckDB. Since production will almost certainly move to Snowflake,
+I switched to `dbt_utils.date_spine` which compiles correctly across warehouses.
 
 **No contract on `dim_date`.**
-Contracts are enforced on all core and mart models except `dim_date`. It is a utility table
-with no downstream join keys or grain constraints. Over-specifying its schema adds maintenance
-overhead for no real protection — schema drift on a date dimension would surface through tests
-long before a contract mattered.
+Contracts are enforced on all core and mart models except `dim_date`. It's a standalone
+utility table - there's no external drift risk and no downstream join keys to protect.
+Adding a contract there would just be maintenance overhead with no real upside.
 
-**Unit tests cover only non-obvious logic.**
-Three tests were removed: lowercase normalisation (testing a built-in SQL function), inactive
-listing exclusion from the mart (testing a WHERE clause), and column alias correctness (already
-covered by enforced contracts). What remains: the 180-day boundary condition on `is_active`,
-the LEFT JOIN behaviour that preserves leads on unlisted properties, and two-decimal rounding
-on `leads_per_listing`. The principle: unit tests guard against logic errors a future engineer
-could plausibly introduce — not verify that `lower()` works.
+**Unit tests only where logic is non-obvious.**
+I removed three tests that were either testing built-in SQL functions or things already
+covered by enforced contracts. What's left are the cases where a future engineer could
+plausibly introduce a bug: the 180-day boundary condition, the LEFT JOIN that keeps
+zero-lead listings in the denominator, and the two-decimal rounding on `leads_per_listing`.
 
 ---
 
 ## Productionisation & Monitoring
 
-**Code changes needed to go live.**
-Two one-line changes in the staging models: swap `ref('raw_listings')` for
-`source('raw', 'listings')`, and activate the freshness SLAs already defined in
-`sources.yml`. Everything else — snapshots, core models, mart, analyses — is
-environment-agnostic.
+**Going live is two one-line changes.**
+Swap `ref('raw_listings')` for `source('raw', 'listings')` in the two staging models, and
+activate the freshness SLAs already defined in `sources.yml`. Everything else - snapshots,
+core models, mart, analyses - is already environment-agnostic.
 
 **Orchestration.**
-Daily schedule via Airflow or dbt Cloud: S3 drop → Snowpipe ingest → `dbt snapshot` →
-`dbt run` → `dbt test` → `dbt source freshness`. Any test or freshness failure pages
-on-call before the BI dashboard refresh runs. Snapshots must run before core models;
-staging views must exist before snapshots — the Makefile already enforces this order
-locally.
+Daily job via Airflow or dbt Cloud: S3 drop -> Snowpipe -> `dbt snapshot` -> `dbt run` ->
+`dbt test` -> `dbt source freshness`. The order matters - staging views need to exist
+before snapshots run - which the Makefile already enforces locally. Any failure should
+page on-call before the BI dashboard refresh, not after.
 
 **CI/CD.**
-PR gate runs `dbt compile` + `dbt test --select state:modified+` (dbt slim CI — only
-changed models and their dependents). Enforced contracts mean a renamed column in a
-yml file that does not match the SQL immediately fails the build; schema changes become
-an explicit, auditable decision rather than a silent drift.
+PRs run `dbt compile` + `dbt test --select state:modified+` so only the changed models
+and their dependents get tested. With enforced contracts, a renamed column that doesn't
+match the yml fails the build immediately - schema changes become a deliberate decision
+rather than something that silently breaks a dashboard.
 
-**Observability.**
-Emit dbt run results to a `dbt_artifacts` table via an `on-run-end` hook. Alert on:
-row-count drop > 20% vs. the previous day (silent upstream truncation), freshness SLA
-breach, and any contract violation. Model run times and test pass rates feed a lightweight
-ops dashboard so degradation is caught before analysts notice stale numbers.
+**Alerting.**
+I'd wire up Slack alerts for test failures, freshness breaches, and contract violations.
+Row count drops over 20% vs. the previous day should go to PagerDuty - that pattern almost
+always means a silent upstream truncation. Storing dbt run results in a `dbt_artifacts`
+table via an `on-run-end` hook means alert thresholds can be calculated against historical
+baselines rather than hardcoded.
 
 **Dev/prod isolation.**
-Snowflake zero-copy cloning (`CREATE DATABASE dev CLONE prod`) gives an instant,
-full-fidelity dev environment at no storage cost. dbt targets (`dev`, `prod`) route to
-different Snowflake databases via `profiles.yml`; no code changes required to switch
-environments.
+Snowflake zero-copy cloning makes this easy: `CREATE DATABASE dev CLONE prod` gives a
+full-fidelity dev environment instantly. dbt profiles handle the routing between databases,
+so no code changes are needed when switching environments.
 
 ---
 
-## Gaps Worth Noting
+## What's Missing
 
-No incremental models — full refresh is acceptable at this data volume; incrementals are
-not justified yet. No dedicated agent source — `dim_agent` is derived entirely from
-listing data, which limits agent-side segmentation until a proper feed exists.
+No incremental models yet - full refresh is fine at this data volume and the added
+complexity isn't justified. There's also no dedicated agent source; `dim_agent` is derived
+entirely from listing data, which limits how much you can segment on the agent side until
+a proper feed exists.
