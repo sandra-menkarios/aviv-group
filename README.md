@@ -1,22 +1,21 @@
-# AVIV Data Platform — Analytics Engineering Case
+# AVIV Data Platform - Analytics Engineering Case
 
-> **Stack:** AWS S3 → Snowflake → dbt (dbt-duckdb locally)  
-> **Key metric:** Leads per Active Listing by property type and region  
-> **Quick start:** `make` — installs everything and runs the full pipeline
+> **Stack:** AWS S3 → Snowflake → dbt (dbt-duckdb locally)
+> **Key metric:** Leads per Active Listing by property type and region
+> **Quick start:** `make` - installs everything and runs the full pipeline
 
 ---
 
 ## Table of Contents
 1. [Architecture](#1-architecture)
-2. [Ingestion — S3 → Snowflake](#2-ingestion--s3--snowflake)
+2. [Ingestion - S3 → Snowflake](#2-ingestion--s3--snowflake)
 3. [Project Structure](#3-project-structure)
 4. [Quick Start](#4-quick-start)
 5. [Data Model](#5-data-model)
-6. [dbt Tests & Data Quality](#6-dbt-tests--data-quality)
-7. [dbt Model Contracts](#7-dbt-model-contracts)
-8. [Business Value](#8-business-value)
-9. [Real-World Considerations](#9-real-world-considerations)
-10. [Productionisation & Monitoring](#10-productionisation--monitoring)
+6. [Tests & Data Quality](#6-tests--data-quality)
+7. [Model Contracts](#7-model-contracts)
+8. [Real-World Considerations](#8-real-world-considerations)
+9. [Productionisation & Monitoring](#9-productionisation--monitoring)
 
 ---
 
@@ -29,24 +28,24 @@
 │  S3 (daily CSV drop)                                         │
 │      │                                                       │
 │      ▼  COPY INTO / Snowpipe (auto-ingest on S3 event)      │
-│  Snowflake  ──  raw schema  (raw_listings, raw_leads)        │
+│  Snowflake  --  raw schema  (raw_listings, raw_leads)        │
 └─────────────────────────┬────────────────────────────────────┘
                           │
 ┌─────────────────────────▼────────────────────────────────────┐
 │  Transformation  (dbt)                                       │
 │                                                              │
 │  staging  (views)                                            │
-│    stg_listings  ── type-cast, normalise, is_active flag     │
-│    stg_leads     ── type-cast, normalise contact_source      │
+│    stg_listings  -- cast types, trim whitespace              │
+│    stg_leads     -- cast types, trim whitespace              │
 │                                                              │
-│  core  (views + tables)                                      │
-│    dim_date      ── calendar spine (table)                   │
-│    dim_listing   ── listing dimension, SCD Type 1 (view)     │
-│    dim_agent     ── agent dimension, derived (view)          │
-│    fct_leads     ── lead fact, denormalised (table)          │
+│  core  (tables)                                              │
+│    dim_date      -- calendar spine                           │
+│    dim_listing   -- listing dimension, SCD Type 2            │
+│    dim_agent     -- agent dimension, derived                 │
+│    fct_leads     -- lead fact, denormalised                  │
 │                                                              │
 │  marts  (tables)                                             │
-│    mart_leads_per_listing  ── key business KPI               │
+│    mart_leads_per_listing  -- key business KPI               │
 └─────────────────────────┬────────────────────────────────────┘
                           │
 ┌─────────────────────────▼────────────────────────────────────┐
@@ -55,25 +54,24 @@
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**Why this stack?**
+S3 holds the daily CSV drops. Snowflake loads them on a schedule. dbt transforms raw tables
+into a dimensional model through three layers. DuckDB runs the whole thing locally with no
+infrastructure setup - same SQL dialect, zero overhead.
 
-| Layer | Choice | Rationale |
+| Layer | Choice | Why |
 |---|---|---|
-| Storage | S3 | Cost-effective, native AWS integration, easy Snowpipe trigger |
+| Storage | S3 | Cost-effective, native AWS, easy Snowpipe trigger |
 | Warehouse | Snowflake | Elastic compute, zero-copy cloning for dev/prod isolation |
-| Transformation | dbt | Version-controlled SQL, lineage, built-in testing, docs, contracts |
-| Local dev | DuckDB | Zero-infrastructure, Snowflake-compatible SQL dialect |
+| Transformation | dbt | Version-controlled SQL, lineage, tests, contracts |
+| Local dev | DuckDB | No infrastructure, Snowflake-compatible SQL dialect |
 
 ---
 
-## 2. Ingestion — S3 → Snowflake
+## 2. Ingestion - S3 → Snowflake
 
-In production, daily CSV drops in S3 are loaded into the Snowflake raw schema via **COPY INTO** (scheduled) or **Snowpipe** (event-driven, lower latency).
-
-### Option A — Scheduled COPY INTO (Airflow / dbt Cloud job)
+Daily CSVs land in S3 and get loaded into Snowflake's raw schema on a schedule:
 
 ```sql
--- Stage pointing at the S3 bucket (created once)
 CREATE OR REPLACE STAGE raw.s3_listings_stage
   URL = 's3://seloger-data/listings/'
   CREDENTIALS = (AWS_ROLE = 'arn:aws:iam::123456789:role/snowflake-loader')
@@ -85,38 +83,22 @@ CREATE OR REPLACE STAGE raw.s3_listings_stage
     DATE_FORMAT = 'YYYY-MM-DD HH24:MI:SS'
   );
 
--- Daily load (run after S3 drop is confirmed)
 COPY INTO raw.listings
 FROM @raw.s3_listings_stage/dt={{ ds }}/
-MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE  -- absorbs new columns without failing (schema drift)
-ON_ERROR = CONTINUE;                      -- logs bad rows; doesn't abort the entire load
-
--- Equivalent for leads
-COPY INTO raw.leads
-FROM @raw.s3_leads_stage/dt={{ ds }}/
-MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE
-ON_ERROR = CONTINUE;
+MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE  -- new columns don't break the load
+ON_ERROR = CONTINUE;                      -- bad rows get logged, not dropped
 ```
 
-### Option B — Snowpipe (auto-ingest on S3 PUT event)
+`MATCH_BY_COLUMN_NAME` means a new column added upstream lands in Snowflake without
+failing the job - the team decides later whether to pull it through the pipeline.
+`ON_ERROR = CONTINUE` gives partial data rather than no data on a bad file day.
 
-```sql
-CREATE OR REPLACE PIPE raw.listings_pipe
-  AUTO_INGEST = TRUE
-  AS
-  COPY INTO raw.listings
-  FROM @raw.s3_listings_stage
-  MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE;
-```
+If the ingestion SLA needs tightening, Snowpipe can replace the scheduled job and trigger
+on S3 PUT events directly. The stage definition stays the same - only the pipe changes.
 
-Snowpipe triggers via an S3 event notification, reducing ingestion lag from hours to minutes.  
-Trade-off: slightly higher per-file cost vs. batch COPY INTO.
-
-### Local development
-
-Snowflake and S3 are simulated by **dbt seeds** (`seeds/raw_listings.csv`, `seeds/raw_leads.csv`).  
-Staging models reference `{{ ref('raw_listings') }}` locally; in production they would use  
-`{{ source('raw', 'listings') }}` pointing at the Snowflake raw tables.
+Locally, seeds replace S3 and Snowflake entirely. Staging models use `ref('raw_listings')`
+in dev; in production they swap to `source('raw', 'listings')` - a one-line change already
+commented in each staging model.
 
 ---
 
@@ -130,18 +112,18 @@ aviv-data-case/
 │
 ├── models/
 │   ├── staging/
-│   │   ├── _sources.yml              # Source defs + freshness SLAs (production)
-│   │   ├── stg_listings.sql          # Clean + normalise listings
+│   │   ├── sources.yml               # Source defs, freshness SLAs + source tests (production)
+│   │   ├── stg_listings.sql          # Cast types, trim whitespace
 │   │   ├── stg_listings.yml          # Column docs + tests
-│   │   ├── stg_leads.sql             # Clean + normalise leads
+│   │   ├── stg_leads.sql             # Cast types, trim whitespace
 │   │   └── stg_leads.yml             # Column docs + tests
 │   │
-│   ├── core/                         # Dims + fcts; consumed by marts only
-│   │   ├── dim_date.sql              # Calendar spine (2024–2025)
-│   │   ├── dim_date.yml              # Docs + tests + enforced contract
-│   │   ├── dim_listing.sql           # Listing dimension (SCD Type 1)
+│   ├── core/                         # Dims + facts; consumed by marts only
+│   │   ├── dim_date.sql              # Calendar spine (2024-2025), built with dbt_utils.date_spine
+│   │   ├── dim_date.yml              # Docs + tests
+│   │   ├── dim_listing.sql           # SCD Type 2 listing dimension, normalises + computes is_active
 │   │   ├── dim_listing.yml           # Docs + tests + enforced contract
-│   │   ├── dim_agent.sql             # Agent dimension (derived from listings)
+│   │   ├── dim_agent.sql             # Agent dimension (derived from dim_listing)
 │   │   ├── dim_agent.yml             # Docs + tests + enforced contract
 │   │   ├── fct_leads.sql             # Lead fact, denormalised
 │   │   └── fct_leads.yml             # Docs + tests + enforced contract
@@ -151,12 +133,13 @@ aviv-data-case/
 │       └── mart_leads_per_listing.yml  # Docs + tests + enforced contract
 │
 ├── analyses/
-│   └── business_insights.sql         # 4 ad-hoc insight queries (dbt compile to run)
+│   └── business_insights.sql         # 4 ad-hoc insight queries (make insights to run)
 │
-├── scripts/
-│   └── run_analyses.py               # Terminal business report (pretty-printed tables)
+├── snapshots/
+│   └── snap_listings.sql             # SCD Type 2 snapshot of listings
 │
-├── Makefile                          # One command: make → install+seed+run+test+insights
+├── Makefile                          # One command: make → install+seed+snapshot+run+test+insights
+├── packages.yml                      # dbt package dependencies (dbt_utils)
 ├── dbt_project.yml                   # Materialisation strategy + schema routing
 ├── profiles.yml                      # DuckDB (dev) / Snowflake (prod) profiles
 └── README.md
@@ -166,54 +149,21 @@ aviv-data-case/
 
 ## 4. Quick Start
 
-### One command (recommended)
-
 ```bash
 cd aviv-data-case
-make          # installs .venv, seeds DuckDB, builds models, runs 52 tests, prints insights
+make          # installs .venv, seeds DuckDB, builds models, runs 68 tests, prints insights
 ```
 
 Other targets:
 
 ```bash
-make install  # create .venv + install dbt-duckdb (Python 3.9–3.12 required)
+make install  # create .venv + install dbt-duckdb (Python 3.9-3.12 required)
 make seed     # load CSV seeds
 make run      # build all 7 models
-make test     # run all 52 tests
+make test     # run all 68 tests (14 source + 50 model + 4 unit)
 make insights # print business analysis to terminal
 make clean    # remove .venv, target/, dev.duckdb
 make help     # list all targets
-```
-
-> **Python requirement:** dbt-core requires Python 3.9–3.12.  
-> `make` auto-detects the right version; if none is found it prints a clear error.
-
-### Manual steps (without make)
-
-```bash
-python3.11 -m venv .venv && .venv/bin/pip install dbt-duckdb
-.venv/bin/dbt seed    --profiles-dir .
-.venv/bin/dbt run     --profiles-dir .
-.venv/bin/dbt test    --profiles-dir .
-.venv/bin/python3 scripts/run_analyses.py
-```
-
-### Query results directly
-
-```bash
-brew install duckdb   # macOS
-duckdb dev.duckdb
-```
-
-```sql
--- Key metric
-SELECT * FROM main_marts.mart_leads_per_listing ORDER BY leads_per_listing DESC;
-
--- Under-performing listings
-SELECT listing_id, city, property_type, price
-FROM main_core.dim_listing
-WHERE is_active = true
-  AND listing_id NOT IN (SELECT DISTINCT listing_id FROM main_core.fct_leads);
 ```
 
 ---
@@ -223,118 +173,106 @@ WHERE is_active = true
 ### Lineage
 
 ```
-raw_listings (seed) ─────────────────────┐
-                                         ▼
-                                   stg_listings (view)
-                                    │           │
-                                    ▼           ▼
-                              dim_listing    dim_agent
-                              (view)         (view)
-                                    │
-raw_leads (seed) ──> stg_leads ──> fct_leads (table)
-                     (view)         │
-                                    │    dim_date (table)
-                                    │    (no upstream deps)
-                                    ▼
-                        mart_leads_per_listing (table)
+raw_listings (seed) ──> stg_listings (view)
+                               │
+                               ▼
+                         snap_listings (snapshot)
+                               │
+                               ▼
+                         dim_listing (table, SCD Type 2)
+                          │        │                  │
+                          ▼        ▼                  │
+                       dim_agent  fct_leads ◄──────── │ ── stg_leads (view) ◄── raw_leads (seed)
+                       (table)    (table)              │
+                                      │               │
+                                      └───────────────┤
+                                                      ▼
+                                        mart_leads_per_listing (table)
+
+dim_date (table) - standalone, no upstream SQL dependencies
 ```
 
-Marts reference **only core layer models** — never staging directly.  
-This isolates business logic from raw data transformations.
+Marts only reference core models, never staging. The mart doesn't need to know how data
+was cleaned - only what shape it arrives in.
 
 ### Layer responsibilities
 
-| Layer | Purpose | Materialisation |
+| Layer | Materialisation | Purpose |
 |---|---|---|
-| staging | Type-cast, normalise, one row per source row | view |
-| core | Dimensional model (dims + fct), denormalised, joined | view / table |
-| marts | Business-facing aggregations, KPIs | table |
+| staging | view | Cast types, trim whitespace - one row per source row, no logic |
+| core | table | Dimensional model with all business rules applied |
+| marts | table | Pre-aggregated KPIs for BI consumption |
 
-### Key design decisions
+### Why the model is built this way
 
-| Column | Decision |
+**Staging does nothing except cast and trim.** Business rules like `is_active` and
+lowercase normalisation started here, but staging should absorb source format changes
+without touching anything downstream.
+
+**`is_active` is computed in `dim_listing`.** A listing is active if its `updated_at`
+falls within 180 days of the most recent update across all current rows. Since it is a
+business decision, it belongs in the dimension that owns listing state.
+
+**`lower()` is applied in core.** `property_type` is normalised in `dim_listing`,
+`contact_source` in `fct_leads`. Both guard against `"Apartment"` vs `"apartment"`
+silently creating two segments in aggregations.
+
+**Snapshots are kept even though the dataset is thin.** There is not enough price-change
+history yet to justify a point-in-time join, so `fct_leads` currently uses `is_current = true`.
+But removing snapshots now means rebuilding history from scratch when the data does
+accumulate. The correct join is documented as a TODO in `fct_leads.sql`.
+
+**`dim_agent` is derived from `dim_listing`.** There is no agent feed. Agent attributes
+are aggregated from listing data, and the model is designed to be swapped out if another
+proper source arrives.
+
+---
+
+## 6. Tests & Data Quality
+
+**68 tests** - 14 source, 50 schema, 4 unit. Every test defends against something that
+would silently hurt the business metric if it slipped through.
+
+**Primary key uniqueness** on every model from staging through mart. Duplicate rows in
+the daily feed inflate `active_listing_count` and dilute `leads_per_listing` without
+any visible error. Catching duplicates at staging stops the corruption before it reaches
+any aggregation.
+
+**Referential integrity** on `stg_leads.listing_id → stg_listings.listing_id` and
+`fct_leads.listing_id → dim_listing.listing_id`. Orphaned leads - contacts for listings
+that no longer appear in the feed - won't silently vanish from metrics. The test surfaces
+them so the team decides what to do rather than quietly losing them.
+
+**Accepted values** on `property_type` (`apartment`, `house`, `parking`) and
+`contact_source` (`organic`, `paid`, `partner`). A new upstream value or typo creates an
+untracked segment that skews aggregations. The test fails loudly so adding a new category
+is an explicit decision, not silent data drift.
+
+**Source freshness** configured in `sources.yml` - warn at 25 hours, error at 49. A
+stalled Snowpipe or missed S3 drop leaves analysts on stale data without knowing it.
+Freshness errors fire before the BI dashboard refresh runs.
+
+**Unit tests** on the four spots where the logic is non-obvious:
+
+| Test | What it guards |
 |---|---|
-| `is_active` | Derived flag: listing updated within 180 days of the dataset max date. No status field in source — this is the cleanest available proxy. |
-| `property_type` | `lower(trim(...))` — guards against `"Apartment"` vs `"apartment"` creating two segments. |
-| `contact_source` | Same normalisation — `"Paid"` and `"paid"` are the same channel. |
-| `leads_per_listing` | Left-join so zero-lead listings are not silently excluded from the denominator. |
-| `fct_leads` grain | One row per contact event (`contact_id` PK). Listing attributes are denormalised to avoid joins at mart time. |
-| `dim_agent` | No agent feed exists — derived entirely from listings. Designed to be replaced when a proper agent source arrives. |
+| `test_is_active_flag_at_180_day_boundary` | `<= 180` vs `< 180` - a listing updated exactly on day 180 must be active |
+| `test_zero_lead_listings_included_in_denominator` | LEFT JOIN keeps zero-lead listings in the denominator; an INNER JOIN would silently overstate `leads_per_listing` |
+| `test_leads_per_listing_rounds_to_two_decimal_places` | 7 leads / 3 listings = 2.33, not 2.3 or 2.333 |
+| `test_orphaned_lead_preserved_with_null_attributes` | A lead for a deleted listing keeps its row with NULLs on listing columns - it is not dropped |
+
+Run unit tests with: `dbt test --select "test_type:unit" --profiles-dir .`
 
 ---
 
-## 6. dbt Tests & Data Quality
+## 7. Model Contracts
 
-**52 tests** across 7 models. Each test defends a specific business or technical risk.
-
-### Category 1 — Uniqueness on primary keys
-
-```yaml
-- unique    # dim_listing.listing_id, dim_agent.agent_id,
-            # dim_date.date_day, fct_leads.contact_id
-            # stg_listings.listing_id, stg_leads.contact_id
-```
-
-**Risk:** Duplicate rows in the raw feed (daily file re-delivering yesterday's records) inflate
-`active_listing_count` and `total_leads`, making conversion metrics appear artificially lower.
-Catching duplicates at staging prevents silent miscounts in every downstream model.
-
----
-
-### Category 2 — Referential integrity (relationships)
+All core (except `dim_date`) and mart models have `contract: enforced: true`. During
+`dbt run`, dbt compares every materialised column against the declared type. A renamed
+column, type change, or missing column fails the build immediately with a precise error
+rather than silently breaking a downstream dashboard.
 
 ```yaml
-- relationships:         # stg_leads.listing_id → stg_listings.listing_id
-- relationships:         # fct_leads.listing_id → dim_listing.listing_id
-- relationships:         # fct_leads.contact_date → dim_date.date_day
-```
-
-**Risk:** Orphaned leads (contacts for listings removed from the feed) would silently disappear
-from join-based metrics. This test surfaces discrepancies so the team can decide to keep,
-archive, or flag them rather than losing them quietly.
-
----
-
-### Category 3 — Accepted values on categoricals
-
-```yaml
-- accepted_values:
-    values: ['apartment', 'house', 'parking']   # property_type
-- accepted_values:
-    values: ['organic', 'paid', 'partner']       # contact_source
-- accepted_values:
-    values: [1, 2, 3, 4]                        # dim_date.quarter
-```
-
-**Risk:** A new upstream value (e.g., type `"commercial"` or typo `"appartment"`) creates an
-untracked segment that silently skews aggregates. The test fails loudly so the team consciously
-decides to extend the model rather than absorbing dirty data.
-
----
-
-### Category 4 — Source freshness (production)
-
-Configured in `models/staging/_sources.yml`:
-
-```yaml
-freshness:
-  warn_after:  { count: 25, period: hour }
-  error_after: { count: 49, period: hour }
-```
-
-Run with: `dbt source freshness --profiles-dir .`
-
-**Risk:** A silent ETL failure (Snowpipe stall, S3 permission issue) leaves analysts querying
-stale data without knowing it. Freshness alerts fire before the next business day's reporting runs.
-
----
-
-## 7. dbt Model Contracts
-
-All **core** and **mart** models declare `contract: enforced: true` in their individual yml files.
-
-```yaml
-# Example: models/core/fct_leads.yml
 models:
   - name: fct_leads
     config:
@@ -343,147 +281,80 @@ models:
     columns:
       - name: contact_id
         data_type: varchar
-        ...
       - name: listing_price
         data_type: decimal(12,2)
-        ...
 ```
 
-During `dbt run`, dbt compares every column in the materialized relation against the declared
-`data_type`. A **name mismatch**, **type mismatch**, or **extra / missing column** immediately
-fails the build with a precise diagnostic table:
+`dim_date` is excluded because it is a self-contained spine with no external inputs -
+there is no drift risk worth guarding against. Staging is excluded because it is the
+absorption layer: it needs to flex when the upstream source changes shape, not fail the
+build.
 
-```
-| column_name | definition_type | contract_type | mismatch_reason    |
-| contact_id  | VARCHAR         | INTEGER       | data type mismatch |
-```
-
-### Where contracts are enforced
-
-| Model | Contract | Reason |
-|---|---|---|
-| `dim_date` | ✅ | Calendar reference — any rename breaks every date-keyed join |
-| `dim_listing` | ✅ | Consumed by fct_leads and the mart — stable interface required |
-| `dim_agent` | ✅ | Consumed by analyses and future marts |
-| `fct_leads` | ✅ | Primary fact — most critical interface to lock down |
-| `mart_leads_per_listing` | ✅ | BI-facing — column renames silently break dashboards |
-| `stg_listings` / `stg_leads` | ❌ | Staging is the **absorption layer** — it must adapt to upstream schema drift without failing |
-
-### What a contract guarantees downstream teams
-
-- Column names will not be renamed without a deliberate, versioned change.
-- Data types will not silently widen or narrow (e.g., `BIGINT` → `VARCHAR`).
-- No column will be dropped without prior notice.
-
-A breaking change requires updating the yml contract, re-running, and communicating to
-all consumers — making schema changes an explicit, auditable decision rather than a silent accident.
+| Model | Contract |
+|---|---|
+| `dim_listing` | ✅ |
+| `dim_agent` | ✅ |
+| `fct_leads` | ✅ |
+| `mart_leads_per_listing` | ✅ |
+| `dim_date` | ❌ |
+| `stg_listings` / `stg_leads` | ❌ |
 
 ---
 
-## 8. Business Value
+## 8. Real-World Considerations
 
-The `mart_leads_per_listing` model answers:  
-**"Which property types in which regions are generating the most buyer/renter interest?"**
+**Schema drift.** Staging models select explicit columns, so a new field added upstream
+gets silently ignored until the team decides to adopt it. `MATCH_BY_COLUMN_NAME` in COPY
+INTO means new columns land in Snowflake without breaking the load. Contracts then gate
+what actually reaches the mart.
 
-### Results from mock data (run `make insights` to see live)
+**SCD Type 2.** Listing prices and regions change over time, and a simple overwrite would
+destroy that history. The pipeline snapshots `stg_listings` on every run - when `updated_at`
+changes for a row, dbt closes the old version and opens a new one. `dim_listing` exposes
+`valid_from`, `valid_to`, and `is_current` so downstream consumers can choose the version
+they need:
 
-| property_type | region | active_listings | total_leads | leads_per_listing | tier |
-|---|---|---|---|---|---|
-| apartment | Île-de-France | 2 | 9 | 4.50 | High |
-| apartment | Occitanie | 2 | 7 | 3.50 | High |
-| house | PACA | 2 | 7 | 3.50 | High |
-| parking | * | 4 | 0 | 0.00 | None |
+| Use case | Filter |
+|---|---|
+| Current mart metrics | `WHERE is_current = true` |
+| Point-in-time lead attribution | `WHERE contact_date BETWEEN valid_from AND COALESCE(valid_to, '9999-12-31')` |
+| Price change history | `WHERE listing_id = 'X' ORDER BY valid_from` |
 
-### Actionable outputs (`make insights` runs all four queries)
+**Late-arriving leads.** Leads are joined by `listing_id`, not timestamp proximity, so
+late arrivals in a daily batch land correctly without special handling. Incremental marts
+would need a lookback window (typically 3 days) to catch and reprocess them.
 
-1. **Conversion tiers** — rank every `property_type × region` segment; direct paid spend to High-tier only.
-2. **Zero-lead listings** — 4 parking listings with 0 leads after 477–589 days on market; flag to agents for price review.
-3. **Source mix by region** — Île-de-France split: 45% organic / 27% paid / 27% partner; paid ROI worth scrutinising.
-4. **Agent performance** — A09 and A01 lead at 4.5 leads/active listing; A03 and A06 at 0.0.
-
----
-
-## 9. Real-World Considerations
-
-### Schema drift
-Staging models select explicit columns — a new field (`furnished_flag`) in the upstream CSV
-is silently ignored until the team chooses to adopt it. For Snowflake ingestion, use
-`MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE` in COPY INTO so extra columns load without error.
-Downstream contracts then gate what reaches the mart layer.
-
-### Slowly changing attributes (SCD)
-Price and region can change. The current model **overwrites** on each daily load (Type 1 SCD),
-appropriate for the metric as defined today. If historical price analysis becomes a requirement,
-wrap `stg_listings` in a `dbt snapshot` (Type 2 SCD) using `updated_at` as the unique key:
-
-```yaml
-# snapshots/snap_listings.yml
-snapshots:
-  - name: snap_listings
-    config:
-      strategy: timestamp
-      unique_key: listing_id
-      updated_at: updated_at
-```
-
-This generates `valid_from / valid_to` history rows without modifying existing staging models.
-
-### Late-arriving leads
-Leads are joined by `listing_id`, not timestamp proximity, so daily batch loads handle
-late arrivals naturally. For incremental marts, add a **lookback window** to reprocess recent deltas:
-
-```sql
-{{ config(materialized='incremental', unique_key='listing_id') }}
-{% if is_incremental() %}
-  where updated_at >= (select max(updated_at) from {{ this }}) - interval '3 days'
-{% endif %}
-```
-
-### Data contracts (two layers)
-**Upstream contracts** — validation rules S3/source systems must satisfy before landing data:
-- `listing_id` and `contact_id`: non-null, globally unique.
-- `property_type` and `contact_source`: enum-validated (JSON Schema at S3 or Great Expectations at ingest).
-- `price` > 0.
-- Timestamps: ISO 8601 UTC.
-
-**dbt model contracts** — enforced at build time on all core + mart models (see [Section 7](#7-dbt-model-contracts)).
-Together these form a two-layer defence: bad data is caught at ingestion; schema drift is caught at transformation.
-
-### Performance vs. cost
-
-| Model | Materialisation | Reason |
-|---|---|---|
-| `stg_listings` | view | Thin normalisation pass; no repeat queries against it directly |
-| `stg_leads` | view | Same rationale |
-| `dim_date` | table | Queried on every mart join; pre-compute the spine once |
-| `dim_listing` | view | Cheap wrapper over staging; always current |
-| `dim_agent` | view | Same rationale |
-| `fct_leads` | table | Cross-layer join result; pre-compute to avoid repeated join cost on BI queries |
-| `mart_leads_per_listing` | table | Queried by BI tools on every dashboard load; aggregation must not re-scan all leads |
-| Future high-volume mart | incremental | At millions of leads/day, process only the delta; full recompute becomes unaffordable |
+**Materialisation choices.** Staging is views because they are queried rarely and no
+pre-computation is needed. Everything from core onwards is tables - they sit on top of
+joins and aggregations that would be expensive to rerun on every BI query. At higher
+volumes, `fct_leads` would move to incremental since leads are append-only and only the
+daily delta needs processing. The mart stays full refresh - it re-aggregates across all
+active listings, so a new lead on an existing listing changes a segment's count and the
+whole thing needs to recompute anyway (however it also depends on the use cases).
 
 ---
 
-## 10. Productionisation & Monitoring
+## 9. Productionisation & Monitoring
 
-**Orchestration**
-- Daily schedule (Airflow or dbt Cloud): COPY INTO → `dbt seed` (dev only) → `dbt run` → `dbt test` → `dbt source freshness`.
-- On any test or freshness failure: alert on-call engineer via Slack/PagerDuty *before* the BI dashboard refresh.
+**Orchestration.** Daily Airflow or dbt Cloud job: COPY INTO → `dbt snapshot` → `dbt run`
+→ `dbt test` → `dbt source freshness`. Any failure pages the on-call engineer before the
+BI dashboard refresh runs.
 
-**CI/CD**
-- PR gate: `dbt compile` + `dbt test --select state:modified+` (dbt slim CI — tests only changed models and their dependents).
-- Contract violations block merge: a renamed column in a yml contract that doesn't match the SQL immediately fails CI.
+**CI/CD.** PRs run `dbt compile` + `dbt test --select state:modified+` (slim CI - only
+changed models and their dependents are tested). Contract violations block merge; a column
+rename that is not reflected in the yml fails the build immediately.
 
-**Observability**
-- Emit dbt run results to a `dbt_artifacts` table in Snowflake via an `on-run-end` hook.
-- Dashboard: model run times, test pass/fail rates, row-count deltas per model.
-- Alert on: row count drop > 20% vs. previous day (silent upstream truncation); freshness SLA breach; contract failure.
+**Alerting.** Any test failure, freshness SLA breach, or contract violation triggers a
+Slack alert to the data engineering channel before the BI dashboard refresh runs. Row
+count drops >20% vs. the previous day fire a PagerDuty page - that pattern almost always
+means a silent upstream truncation. dbt run results are written to a `dbt_artifacts`
+table via an `on-run-end` hook so alert thresholds can be calculated against historical
+baselines rather than hardcoded values.
 
-**Access control**
-- Raw schema: write access for the ingestion service role only.
-- Core/Marts: read access for the BI tool service account.
-- dbt runs under a dedicated `transformer` role with no SELECT on raw.
+**Access control.** Raw schema is write-only for the ingestion service role. Core and
+marts are read-only for the BI service account. The dbt transformer role has no SELECT
+on raw.
 
-**Dev/prod isolation**
-- Snowflake zero-copy cloning: `CREATE DATABASE dev CLONE prod` — instant full-fidelity dev environment at zero storage cost.
-- dbt targets (`dev`, `prod`) map to different Snowflake databases via `profiles.yml`.
+**Dev/prod isolation.** Snowflake zero-copy cloning: `CREATE DATABASE dev CLONE prod`
+gives a full-fidelity dev environment instantly at no storage cost. dbt profiles route
+`dev` and `prod` targets to separate Snowflake databases via `profiles.yml`.

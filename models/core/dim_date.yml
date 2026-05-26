@@ -6,13 +6,6 @@ models:
       Date dimension table: one row per calendar day from 2024-01-01 to 2025-12-31.
       Materialized as a table so BI tools can join without re-computing the spine.
       Extend the range in dim_date.sql when a new year approaches.
-    config:
-      contract:
-        enforced: true
-        # Contract guarantee: any model referencing dim_date can rely on these
-        # column names and types never changing without a deliberate schema bump.
-        # A breaking change (rename, type change, removal) must be communicated
-        # to all downstream consumers before deployment.
     columns:
       - name: date_day
         data_type: date

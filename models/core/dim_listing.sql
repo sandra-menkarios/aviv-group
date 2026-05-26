@@ -1,37 +1,34 @@
 {{
     config(
-        materialized = 'view',
-        description  = 'Listing dimension: one row per listing (SCD Type 1 — current state only).'
+        description  = 'Listing dimension (SCD Type 2). All versions — filter is_current = true for latest state.'
     )
 }}
 
--- SCD Type 1: each run reflects the latest state of a listing.
--- If historical price tracking is needed in future, wrap this in a dbt snapshot
--- (SCD Type 2) using updated_at as the uniqueness key.
-with source as (
-    select * from {{ ref('stg_listings') }}
+with snapshot as (
+    select * from {{ ref('snap_listings') }}
+),
+
+max_date as (
+    select max(updated_at::date) as max_updated_at
+    from snapshot
+    where dbt_valid_to is null
 )
 
 select
-    -- Primary key
-    listing_id,
+    s.listing_id,
+    lower(s.property_type) as property_type,
+    s.city,
+    s.region,
+    s.price,
+    s.agent_id,
+    (datediff('day', s.updated_at::date, m.max_updated_at) <= 180)::boolean as is_active,
+    s.created_at,
+    s.updated_at,
+    s.created_at::date as created_date,
+    s.updated_at::date as updated_date,
+    s.dbt_valid_from::timestamp as valid_from,
+    s.dbt_valid_to::timestamp as valid_to,
+    (s.dbt_valid_to is null)::boolean as is_current
 
-    -- Descriptive attributes
-    property_type,
-    city,
-    region,
-    price,
-    agent_id,
-
-    -- Status
-    is_active,
-
-    -- Timestamps
-    created_at,
-    updated_at,
-
-    -- Date keys for joining to dim_date
-    created_at::date   as created_date,
-    updated_at::date   as updated_date
-
-from source
+from snapshot s
+cross join max_date m

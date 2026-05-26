@@ -78,3 +78,23 @@ models:
       - name: listing_is_active
         data_type: boolean
         description: "Denormalized from dim_listing — whether the listing was active at mart build time."
+
+unit_tests:
+
+  - name: test_orphaned_lead_preserved_with_null_attributes
+    description: >
+      Leads for deleted or missing listings must not be silently dropped — the
+      LEFT JOIN must preserve them with NULL for all denormalized listing columns.
+      Dropping orphaned leads would undercount pipeline activity and bias
+      source-level conversion-rate calculations, especially after listings are
+      purged or migrated across systems.
+    model: fct_leads
+    given:
+      - input: ref('stg_leads')
+        rows:
+          - {contact_id: 'C_ORPHAN', listing_id: 'L_DELETED', contact_source: 'paid', contact_timestamp: '2025-03-15 11:00:00'}
+      - input: ref('dim_listing')
+        rows: []
+    expect:
+      rows:
+        - {contact_id: 'C_ORPHAN', listing_id: 'L_DELETED', property_type: null, region: null, city: null, agent_id: null, listing_price: null, listing_is_active: null}

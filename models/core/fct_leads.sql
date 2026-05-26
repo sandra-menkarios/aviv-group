@@ -1,17 +1,22 @@
 {{
     config(
         materialized = 'table',
-        description  = 'Lead fact table: one row per contact event, grain = contact_id.'
+        description  = 'Lead fact table. Grain: one row per contact event (contact_id).'
     )
 }}
 
--- Grain: one row per lead event (contact_id).
--- Denormalises key listing attributes from dim_listing so downstream marts
--- don't need to re-join. date_day is carried to support dim_date joins.
 with leads as (
     select * from {{ ref('stg_leads') }}
 ),
 
+-- TODO: replace with a point-in-time join once meaningful price-change history exists:
+--
+--   from {{ ref('stg_leads') }} l
+--   left join {{ ref('dim_listing') }} d
+--       on  l.listing_id = d.listing_id
+--       and l.contact_timestamp::date between d.valid_from and coalesce(d.valid_to, '9999-12-31')
+--
+-- Using is_current = true for now — one version per listing until history accumulates.
 listings as (
     select
         listing_id,
@@ -22,22 +27,16 @@ listings as (
         price             as listing_price,
         is_active         as listing_is_active
     from {{ ref('dim_listing') }}
+    where is_current = true
 ),
 
 final as (
     select
-        -- Surrogate / natural keys
         l.contact_id,
         l.listing_id,
-
-        -- Date key (joins to dim_date.date_day)
-        l.contact_timestamp::date                   as contact_date,
-
-        -- Measures / degenerate dimensions
-        l.contact_source,
+        l.contact_timestamp::date as contact_date,
+        lower(l.contact_source) as contact_source,
         l.contact_timestamp,
-
-        -- Denormalized listing context (avoids repeated joins in marts)
         d.property_type,
         d.region,
         d.city,

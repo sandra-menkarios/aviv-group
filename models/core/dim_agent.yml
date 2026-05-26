@@ -4,9 +4,9 @@ models:
   - name: dim_agent
     description: >
       Agent dimension: one row per agent, derived from listing activity.
-      No upstream agent feed exists yet — attributes are inferred from
-      stg_listings. Enrich with name/team when a dedicated agent source
-      becomes available.
+      No upstream agent feed exists — attributes are aggregated from
+      dim_listing (current versions only). Designed to be replaced when
+      a dedicated agent source arrives.
     config:
       contract:
         enforced: true

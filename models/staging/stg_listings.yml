@@ -3,61 +3,55 @@ version: 2
 models:
   - name: stg_listings
     description: >
-      Cleaned and normalized property listings. Casts types, trims whitespace,
-      standardizes casing, and derives the is_active flag (updated within the
-      last 180 days relative to the dataset's most recent update).
+      Thin pass over raw_listings: rename columns to warehouse conventions,
+      cast types, and trim whitespace. No business logic.
     columns:
       - name: listing_id
+        data_type: varchar
         description: "Unique listing identifier (PK)."
         tests:
           - unique:
               name: stg_listings_listing_id_unique
-              # Business risk: duplicates inflate active_listing_count and
-              # misrepresent inventory size in every downstream metric.
           - not_null
 
       - name: property_type
-        description: "Normalised property type: apartment, house, or parking."
+        data_type: varchar
+        description: "Raw property type string from source (whitespace-trimmed)."
         tests:
           - not_null
-          - accepted_values:
-              name: stg_listings_property_type_valid
-              # Business risk: unknown types silently create untracked segments
-              # and skew leads_per_listing aggregations.
-              arguments:
-                values: ['apartment', 'house', 'parking']
 
       - name: city
+        data_type: varchar
         description: "City name (whitespace-trimmed)."
         tests:
           - not_null
 
       - name: region
+        data_type: varchar
         description: "Administrative region (whitespace-trimmed)."
         tests:
           - not_null
 
       - name: price
+        data_type: decimal(12,2)
         description: "Listing price in EUR."
         tests:
           - not_null
 
       - name: agent_id
+        data_type: varchar
         description: "Responsible agent identifier."
         tests:
           - not_null
 
       - name: created_at
+        data_type: timestamp
         description: "Listing creation timestamp."
         tests:
           - not_null
 
       - name: updated_at
+        data_type: timestamp
         description: "Latest listing update timestamp."
         tests:
           - not_null
-
-      - name: is_active
-        description: >
-          True if the listing was updated within 180 days of the dataset's most
-          recent record. False = stale listing excluded from mart metrics.

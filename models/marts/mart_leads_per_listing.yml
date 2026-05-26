@@ -59,3 +59,51 @@ models:
         description: >
           Count of active listings with zero leads. A high ratio flags
           under-served inventory worth investigating or re-pricing.
+
+unit_tests:
+
+  - name: test_zero_lead_listings_included_in_denominator
+    description: >
+      The mart LEFT JOINs leads onto active listings, so a listing with zero
+      leads still contributes to active_listing_count and listings_with_no_leads.
+      An INNER JOIN would silently drop it, overstating leads_per_listing and
+      hiding under-served inventory from product/marketing teams.
+    model: mart_leads_per_listing
+    given:
+      - input: ref('dim_listing')
+        rows:
+          - {listing_id: 'L1', property_type: 'apartment', region: 'IDF', city: 'Paris', agent_id: 'A01', price: 300000, is_active: true, is_current: true, created_at: '2025-01-01', updated_at: '2025-01-15'}
+          - {listing_id: 'L2', property_type: 'apartment', region: 'IDF', city: 'Paris', agent_id: 'A02', price: 250000, is_active: true, is_current: true, created_at: '2025-01-01', updated_at: '2025-01-15'}
+      - input: ref('fct_leads')
+        rows:
+          - {contact_id: 'C1', listing_id: 'L1'}
+          # L2 receives no leads — it must still appear in active_listing_count
+    expect:
+      rows:
+        - {property_type: 'apartment', region: 'IDF', active_listing_count: 2, total_leads: 1, leads_per_listing: 0.5, listings_with_no_leads: 1}
+
+  - name: test_leads_per_listing_rounds_to_two_decimal_places
+    description: >
+      leads_per_listing = total_leads / active_listing_count, rounded to 2 d.p.
+      Three parking listings with 3 + 3 + 1 = 7 leads produce 7 / 3 = 2.333...,
+      which must round to 2.33 — not truncate, not carry extra precision.
+      This guards against accidental integer division or wrong rounding scale.
+    model: mart_leads_per_listing
+    given:
+      - input: ref('dim_listing')
+        rows:
+          - {listing_id: 'L1', property_type: 'parking', region: 'PACA', city: 'Marseille', agent_id: 'A01', price: 10000, is_active: true, is_current: true, created_at: '2025-01-01', updated_at: '2025-01-15'}
+          - {listing_id: 'L2', property_type: 'parking', region: 'PACA', city: 'Marseille', agent_id: 'A02', price: 12000, is_active: true, is_current: true, created_at: '2025-01-01', updated_at: '2025-01-15'}
+          - {listing_id: 'L3', property_type: 'parking', region: 'PACA', city: 'Marseille', agent_id: 'A03', price: 11000, is_active: true, is_current: true, created_at: '2025-01-01', updated_at: '2025-01-15'}
+      - input: ref('fct_leads')
+        rows:
+          - {contact_id: 'C1', listing_id: 'L1'}
+          - {contact_id: 'C2', listing_id: 'L1'}
+          - {contact_id: 'C3', listing_id: 'L1'}
+          - {contact_id: 'C4', listing_id: 'L2'}
+          - {contact_id: 'C5', listing_id: 'L2'}
+          - {contact_id: 'C6', listing_id: 'L2'}
+          - {contact_id: 'C7', listing_id: 'L3'}
+    expect:
+      rows:
+        - {property_type: 'parking', region: 'PACA', active_listing_count: 3, total_leads: 7, leads_per_listing: 2.33}

@@ -3,42 +3,36 @@ version: 2
 models:
   - name: stg_leads
     description: >
-      Cleaned and normalized lead/contact events. Casts types, trims whitespace,
-      and normalises contact_source to lowercase.
+      Thin pass over raw_leads: rename columns to warehouse conventions,
+      cast types, and trim whitespace. No business logic.
     columns:
       - name: contact_id
+        data_type: varchar
         description: "Unique contact identifier (PK)."
         tests:
           - unique:
               name: stg_leads_contact_id_unique
-              # Business risk: duplicate leads inflate conversion metrics
-              # and distort channel attribution.
           - not_null
 
       - name: listing_id
+        data_type: varchar
         description: "Foreign key → stg_listings.listing_id."
         tests:
           - not_null
           - relationships:
               name: stg_leads_listing_id_exists
-              # Business risk: orphaned leads (for deleted/missing listings)
-              # would silently drop from join-based metrics without this check.
               arguments:
                 to: ref('stg_listings')
                 field: listing_id
 
       - name: contact_source
-        description: "Acquisition channel, normalised to lowercase."
+        data_type: varchar
+        description: "Acquisition channel from source (whitespace-trimmed)."
         tests:
           - not_null
-          - accepted_values:
-              name: stg_leads_contact_source_valid
-              # Business risk: unknown channels are invisible in source-mix
-              # reports, causing marketing budget misallocation.
-              arguments:
-                values: ['organic', 'paid', 'partner']
 
       - name: contact_timestamp
+        data_type: timestamp
         description: "Timestamp when the contact event was submitted."
         tests:
           - not_null

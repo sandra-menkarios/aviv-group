@@ -1,19 +1,8 @@
--- ─────────────────────────────────────────────────────────────────────────────
 -- Business Insight Queries — SeLoger Lead Conversion Analysis
---
--- Run against the local DuckDB dev database:
---   dbt compile --select business_insights   (generates compiled SQL in target/)
---   or connect to dev.duckdb directly with:
---   duckdb dev.duckdb < target/compiled/aviv_data/analyses/business_insights.sql
---
--- In production, replace schema prefixes with your Snowflake paths.
--- ─────────────────────────────────────────────────────────────────────────────
+-- Run via: make insights  (compiles refs then executes against dev.duckdb)
 
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- 1. Conversion tiers: rank every segment by lead efficiency
---    Use case: identify where to focus marketing budget
--- ─────────────────────────────────────────────────────────────────────────────
 select
     property_type,
     region,
@@ -27,22 +16,18 @@ select
         when leads_per_listing >= 1.5 then 'Medium'
         when leads_per_listing >= 0.5 then 'Low'
         else                               'None'
-    end                                                      as conversion_tier,
+    end as conversion_tier,
 
-    -- Rank within property type (1 = best-converting region for that type)
     rank() over (
         partition by property_type
         order by leads_per_listing desc
-    )                                                        as rank_within_type
+    ) as rank_within_type
 
 from {{ ref('mart_leads_per_listing') }}
 order by leads_per_listing desc;
 
 
--- ─────────────────────────────────────────────────────────────────────────────
--- 2. Under-performing listings (zero leads) — potential re-pricing or re-marketing
---    Use case: alert agents and surface listings for review
--- ─────────────────────────────────────────────────────────────────────────────
+-- 2. Zero-lead active listings — candidates for re-pricing or re-marketing
 select
     l.listing_id,
     l.property_type,
@@ -51,57 +36,51 @@ select
     l.price,
     l.agent_id,
     l.created_at,
-    datediff('day', l.created_at::date, current_date)        as days_on_market
+    datediff('day', l.created_at::date, current_date) as days_on_market
 
-from {{ ref('stg_listings') }} l
-left join {{ ref('stg_leads') }} ld
-    on l.listing_id = ld.listing_id
-where l.is_active = true
-  and ld.contact_id is null
+from {{ ref('dim_listing') }} l
+left join {{ ref('fct_leads') }} fl
+    on l.listing_id = fl.listing_id
+where l.is_active  = true
+  and l.is_current = true
+  and fl.contact_id is null
 order by days_on_market desc;
 
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- 3. Lead source mix by region (organic vs paid vs partner)
---    Use case: understand paid-channel efficiency and potential over-spend
--- ─────────────────────────────────────────────────────────────────────────────
 select
-    l.region,
-    ld.contact_source,
-    count(ld.contact_id)                                     as lead_count,
+    region,
+    contact_source,
+    count(contact_id) as lead_count,
     round(
-        count(ld.contact_id)::decimal
+        count(contact_id)::decimal
         / nullif(
-            sum(count(ld.contact_id)) over (partition by l.region),
+            sum(count(contact_id)) over (partition by region),
             0
           ) * 100,
         1
-    )                                                        as pct_of_region_leads
+    ) as pct_of_region
 
-from {{ ref('stg_listings') }} l
-join {{ ref('stg_leads') }} ld
-    on l.listing_id = ld.listing_id
-group by l.region, ld.contact_source
-order by l.region, lead_count desc;
+from {{ ref('fct_leads') }}
+group by region, contact_source
+order by region, lead_count desc;
 
 
--- ─────────────────────────────────────────────────────────────────────────────
--- 4. Agent performance: leads generated per agent
---    Use case: flag top and bottom performers, support coaching
--- ─────────────────────────────────────────────────────────────────────────────
+-- 4. Agent performance: leads per active listing
 select
     l.agent_id,
-    count(distinct l.listing_id)                             as listing_count,
-    count(ld.contact_id)                                     as total_leads,
+    count(distinct l.listing_id) as active_listings,
+    count(fl.contact_id) as total_leads,
     round(
-        count(ld.contact_id)::decimal
+        count(fl.contact_id)::decimal
         / nullif(count(distinct l.listing_id), 0),
         2
-    )                                                        as leads_per_listing
+    ) as leads_per_listing
 
-from {{ ref('stg_listings') }} l
-left join {{ ref('stg_leads') }} ld
-    on l.listing_id = ld.listing_id
-where l.is_active = true
+from {{ ref('dim_listing') }} l
+left join {{ ref('fct_leads') }} fl
+    on l.listing_id = fl.listing_id
+where l.is_active  = true
+  and l.is_current = true
 group by l.agent_id
 order by leads_per_listing desc;

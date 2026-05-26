@@ -3,23 +3,23 @@ version: 2
 models:
   - name: dim_listing
     description: >
-      Listing dimension: one row per property listing (SCD Type 1).
-      Reflects the current state of every listing. Downstream models that need
-      price history should use a dbt snapshot on top of stg_listings instead.
+      Listing dimension (SCD Type 2). All historical versions from snap_listings.
+      Filter is_current = true for current state.
     config:
       contract:
         enforced: true
     columns:
       - name: listing_id
         data_type: varchar
-        description: "Primary key — unique listing identifier."
+        description: "Listing identifier. Not unique across the table — one row per version."
         tests:
-          - unique
           - not_null
+          - unique:
+              where: "is_current = true"
 
       - name: property_type
         data_type: varchar
-        description: "Normalised property type: apartment, house, or parking."
+        description: "Property type normalised to lowercase here: apartment, house, or parking."
         tests:
           - not_null
           - accepted_values:
@@ -53,8 +53,8 @@ models:
       - name: is_active
         data_type: boolean
         description: >
-          True if the listing was updated within the last 180 days of the
-          dataset's most recent record.
+          True if the listing was updated within 180 days of the dataset's most
+          recent record. Business rule computed in dim_listing, not staging.
 
       - name: created_at
         data_type: timestamp
@@ -75,3 +75,39 @@ models:
       - name: updated_date
         data_type: date
         description: "Date key (YYYY-MM-DD) — joins to dim_date.date_day."
+
+      - name: valid_from
+        data_type: timestamp
+        description: "Start of this listing version's validity window (from snap_listings.dbt_valid_from)."
+
+      - name: valid_to
+        data_type: timestamp
+        description: "End of this listing version's validity window. NULL = current version."
+
+      - name: is_current
+        data_type: boolean
+        description: "True when valid_to IS NULL — this is the latest version of the listing."
+
+unit_tests:
+
+  - name: test_is_active_flag_at_180_day_boundary
+    description: >
+      is_active uses a max-date CTE computed from current snapshot rows, making the
+      180-day boundary easy to get wrong. This pins the exact cutoff: updated exactly
+      180 days before the dataset max = active; 181 days = inactive.
+    model: dim_listing
+    given:
+      - input: ref('snap_listings')
+        rows:
+          # Anchor row — drives max_date = 2025-02-01
+          - {listing_id: 'L_ANCHOR',   property_type: 'apartment', city: 'Paris',     region: 'IDF',  price: 300000, agent_id: 'A01', created_at: '2025-01-01', updated_at: '2025-02-01', dbt_valid_from: '2025-01-01', dbt_valid_to: null, dbt_scd_id: 's1', dbt_updated_at: '2025-02-01'}
+          # Exactly 180 days before anchor → must be active
+          - {listing_id: 'L_EDGE_IN',  property_type: 'house',     city: 'Lyon',      region: 'ARA',  price: 200000, agent_id: 'A02', created_at: '2024-01-01', updated_at: '2024-08-05', dbt_valid_from: '2024-01-01', dbt_valid_to: null, dbt_scd_id: 's2', dbt_updated_at: '2024-08-05'}
+          # 181 days before anchor → must be inactive
+          - {listing_id: 'L_EDGE_OUT', property_type: 'parking',   city: 'Marseille', region: 'PACA', price: 10000,  agent_id: 'A03', created_at: '2024-01-01', updated_at: '2024-08-04', dbt_valid_from: '2024-01-01', dbt_valid_to: null, dbt_scd_id: 's3', dbt_updated_at: '2024-08-04'}
+    expect:
+      rows:
+        - {listing_id: 'L_ANCHOR',   is_active: true}
+        - {listing_id: 'L_EDGE_IN',  is_active: true}
+        - {listing_id: 'L_EDGE_OUT', is_active: false}
+
